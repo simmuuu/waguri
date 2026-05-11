@@ -14,7 +14,10 @@ bot = commands.Bot(command_prefix="!", intents=intents)
 async def setup_hook():
     for filename in os.listdir("./cogs"):
         if filename.endswith(".py"):
-            await bot.load_extension(f"cogs.{filename[:-3]}")
+            file = filename[:-3]
+            await bot.load_extension(f"cogs.{file}")
+
+    await bot.tree.sync()
 
 
 @bot.event
