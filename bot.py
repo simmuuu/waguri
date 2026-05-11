@@ -10,14 +10,11 @@ intents.message_content = True
 bot = commands.Bot(command_prefix="!", intents=intents)
 
 
-@bot.command()
-async def hello(ctx: commands.Context):
-    await ctx.send(f"Hello {ctx.author.name}")
-
-
-@bot.command()
-async def add(ctx: commands.Context, a: int, b: int):
-    await ctx.send(f"{a} + {b} = {a + b}")
+@bot.event
+async def setup_hook():
+    for filename in os.listdir("./cogs"):
+        if filename.endswith(".py"):
+            await bot.load_extension(f"cogs.{filename[:-3]}")
 
 
 @bot.event
@@ -26,6 +23,5 @@ async def on_ready():
 
 
 load_dotenv()
-
 # bot.run will raise KeyError if env variable is missing
 bot.run(os.environ["DISCORD_TOKEN"])
