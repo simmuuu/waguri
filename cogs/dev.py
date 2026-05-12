@@ -1,7 +1,5 @@
 import os
 
-import discord
-from discord import app_commands
 from discord.ext import commands
 
 
@@ -9,11 +7,15 @@ class Dev(commands.Cog):
     def __init__(self, bot: commands.Bot):
         self.bot = bot
 
-    @app_commands.command(
-        name="sync_cogs", description="sync cogs !!! DEV MODE ONLY !!!"
-    )
+    @commands.command()
     @commands.is_owner()
-    async def sync_cogs(self, interaction: discord.Interaction):
+    async def sync_tree(self, ctx: commands.Context):
+        synced = await self.bot.tree.sync()
+        await ctx.send(f"{len(synced)} app commands synced!")
+
+    @commands.command()
+    @commands.is_owner()
+    async def sync_cogs(self, ctx: commands.Context):
         loaded = set(self.bot.extensions.keys())
         on_disk = {f"cogs.{f[:-3]}" for f in os.listdir("./cogs") if f.endswith(".py")}
 
@@ -44,7 +46,7 @@ class Dev(commands.Cog):
             except Exception as e:
                 results.append(f"{ext}: {e}")
 
-        await interaction.response.send_message("\n".join(results), ephemeral=True)
+        await ctx.send("\n".join(results))
 
 
 async def setup(bot: commands.Bot):
