@@ -12,12 +12,22 @@ bot = commands.Bot(command_prefix="!", intents=intents)
 
 @bot.event
 async def setup_hook():
-    for filename in os.listdir("./cogs"):
-        if filename.endswith(".py"):
-            file = filename[:-3]
-            await bot.load_extension(f"cogs.{file}")
+    is_dev = "waguri_dev" in os.environ
 
-    await bot.tree.sync()
+    for filename in os.listdir("./cogs"):
+        if not filename.endswith(".py"):
+            continue
+
+        file = filename[:-3]
+
+        if file == "dev" and not is_dev:
+            continue
+
+        await bot.load_extension(f"cogs.{file}")
+
+    # sync application commands
+    if "waguri_prod" in os.environ:
+        await bot.tree.sync()
 
 
 @bot.event
