@@ -1,5 +1,6 @@
 import os
 
+import discord
 from discord.ext import commands
 
 
@@ -10,7 +11,10 @@ class Dev(commands.Cog):
     @commands.command()
     @commands.is_owner()
     async def sync_tree(self, ctx: commands.Context):
-        synced = await self.bot.tree.sync()
+        guild = discord.Object(id=os.environ["GUILD_ID"])
+
+        self.bot.tree.copy_global_to(guild=guild)
+        synced = await self.bot.tree.sync(guild=guild)
         await ctx.send(f"{len(synced)} app commands synced!")
 
     @commands.command()
