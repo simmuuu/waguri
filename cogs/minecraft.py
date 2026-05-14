@@ -22,13 +22,9 @@ class Minecraft(commands.Cog):
     ):
         await interaction.response.defer()
         try:
-            loop = asyncio.get_event_loop()
-            infos = await loop.run_in_executor(
-                None, lambda: socket.getaddrinfo(address, port, socket.AF_INET6)
-            )
-            ipv6_address = str(infos[0][4][0])
+            ip_addr = await self.get_ip_address(address)
 
-            server = JavaServer(host=ipv6_address, port=port, query_port=query_port)
+            server = JavaServer(host=ip_addr, port=port, query_port=query_port)
             status = await server.async_status()
 
             players_online, players_max = status.players.online, status.players.max
@@ -45,8 +41,29 @@ class Minecraft(commands.Cog):
             await interaction.followup.send(
                 f"Ping: {ping}ms\nOnline: {players_online}/{players_max}\n{player_list}"
             )
+        except socket.gaierror:
+            await interaction.followup.send("Could not resolve server address.")
         except Exception as e:
             await interaction.followup.send(f"Error: {e}")
+
+    async def get_ip_address(self, address: str):
+        loop = asyncio.get_event_loop()
+        resolved_ip = ""
+
+        # Try IPv6 first
+        try:
+            infos = await loop.run_in_executor(
+                None, lambda: socket.getaddrinfo(address, 25565, socket.AF_INET6)
+            )
+            resolved_ip = str(infos[0][4][0])
+        # else IPv4
+        except socket.gaierror:
+            infos = await loop.run_in_executor(
+                None, lambda: socket.getaddrinfo(address, 25565, socket.AF_INET)
+            )
+            resolved_ip = str(infos[0][4][0])
+
+        return resolved_ip
 
 
 async def setup(bot: commands.Bot):
