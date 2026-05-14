@@ -21,3 +21,4 @@
 - ip address details, nmap?
 - urban dictionary
 - avatar
+- provide rich embed links (instagram.com -> kkinstagram.com, x.com -> fxtwitter.com) (regex)
