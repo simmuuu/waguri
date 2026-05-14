@@ -1,4 +1,6 @@
 import asyncio
+import base64
+import io
 import socket
 
 import discord
@@ -23,24 +25,38 @@ class Minecraft(commands.Cog):
         await interaction.response.defer()
         try:
             ip_addr = await self.get_ip_address(address)
-
             server = JavaServer(host=ip_addr, port=port, query_port=query_port)
             status = await server.async_status()
 
             players_online, players_max = status.players.online, status.players.max
             ping = round(status.latency, 2)
-
             player_list = ""
+
             try:
                 query = await server.async_query()
                 if query.players.list:
-                    player_list = f"\nPlayers: {', '.join(query.players.list)}"
+                    player_list = "\n".join(query.players.list)
             except Exception:
-                player_list = "\nFailed to interact with query port."
+                player_list = "Couldn't retrieve player list."
 
-            await interaction.followup.send(
-                f"Ping: {ping}ms\nOnline: {players_online}/{players_max}\n{player_list}"
-            )
+            embed = discord.Embed(title=address, color=0x5B8731)
+            embed.add_field(name="Ping", value=f"{ping}ms")
+            embed.add_field(name="Online", value=f"{players_online}/{players_max}")
+
+            if player_list:
+                embed.add_field(
+                    name="Players", value=f"```\n{player_list}\n```", inline=False
+                )
+
+            if status.icon:
+                _, base64_data = status.icon.split(",")
+                image_bytes = base64.b64decode(base64_data)
+                buffer = io.BytesIO(image_bytes)
+                file = discord.File(buffer, filename="server_icon.png")
+                embed.set_thumbnail(url="attachment://server_icon.png")
+                await interaction.followup.send(embed=embed, file=file)
+            else:
+                await interaction.followup.send(embed=embed)
         except socket.gaierror:
             await interaction.followup.send("Could not resolve server address.")
         except Exception as e:
