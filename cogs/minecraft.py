@@ -1,3 +1,4 @@
+import asyncio
 import socket
 
 import discord
@@ -21,7 +22,10 @@ class Minecraft(commands.Cog):
     ):
         await interaction.response.defer()
         try:
-            infos = socket.getaddrinfo(address, port, socket.AF_INET6)
+            loop = asyncio.get_event_loop()
+            infos = await loop.run_in_executor(
+                None, lambda: socket.getaddrinfo(address, port, socket.AF_INET6)
+            )
             ipv6_address = str(infos[0][4][0])
 
             server = JavaServer(host=ipv6_address, port=port, query_port=query_port)
