@@ -10,16 +10,23 @@ class Dev(commands.Cog):
 
     @commands.command()
     @commands.is_owner()
-    async def sync_tree(self, ctx: commands.Context):
+    async def sync(self, ctx: commands.Context, mode: str | None):
+        match mode:
+            case "tree":
+                await self._sync_tree(ctx)
+            case "cogs":
+                await self._sync_cogs(ctx)
+            case _:
+                await ctx.send("Usage: !sync <tree|cogs>")
+
+    async def _sync_tree(self, ctx: commands.Context):
         guild = discord.Object(id=os.environ["GUILD_ID"])
 
         self.bot.tree.copy_global_to(guild=guild)
         synced = await self.bot.tree.sync(guild=guild)
         await ctx.send(f"{len(synced)} app commands synced!")
 
-    @commands.command()
-    @commands.is_owner()
-    async def sync_cogs(self, ctx: commands.Context):
+    async def _sync_cogs(self, ctx: commands.Context):
         loaded = set(self.bot.extensions.keys())
         on_disk = {f"cogs.{f[:-3]}" for f in os.listdir("./cogs") if f.endswith(".py")}
 
