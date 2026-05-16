@@ -13,9 +13,11 @@ class Minecraft(commands.Cog):
     def __init__(self, bot: commands.Bot):
         self.bot = bot
 
-    @app_commands.command(name="mc_info", description="minecraft server info")
-    @app_commands.describe(port="default: 25565", query_port="default: 25565")
-    async def mc_info(
+    minecraft = app_commands.Group(name="minecraft", description="Minecraft Commands")
+
+    @minecraft.command(name="info", description="Minecraft Server Info")
+    @app_commands.describe(port="Default: 25565", query_port="Default: 25565")
+    async def info(
         self,
         interaction: discord.Interaction,
         address: str,
@@ -24,7 +26,7 @@ class Minecraft(commands.Cog):
     ):
         await interaction.response.defer()
         try:
-            ip_addr = await self.get_ip_address(address)
+            ip_addr = await self._get_ip_address(address)
             server = JavaServer(host=ip_addr, port=port, query_port=query_port)
             status = await server.async_status()
 
@@ -64,7 +66,7 @@ class Minecraft(commands.Cog):
             await interaction.followup.send(f"Error: {e}")
 
     # consider aiodns
-    async def get_ip_address(self, address: str):
+    async def _get_ip_address(self, address: str):
         loop = asyncio.get_event_loop()
         resolved_ip = ""
 
