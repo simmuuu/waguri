@@ -2,39 +2,42 @@ import os
 
 import discord
 from discord.ext import commands
-from dotenv import load_dotenv
+
+from utils.http import HttpClient
 
 intents = discord.Intents.default()
 intents.message_content = True
 
-bot = commands.Bot(command_prefix="!", intents=intents)
 
+class WaguriBot(commands.Bot):
+    http_client: HttpClient
 
-@bot.event
-async def setup_hook():
-    is_dev = "waguri_dev" in os.environ
+    def __init__(self):
+        super().__init__(command_prefix="!", intents=intents)
 
-    for filename in os.listdir("./cogs"):
-        if not filename.endswith(".py"):
-            continue
+    async def setup_hook(self):
+        self.http_client = HttpClient()
+        self.http_client.start()
 
-        file = filename[:-3]
+        is_dev = "waguri_dev" in os.environ
 
-        if file == "dev" and not is_dev:
-            continue
+        for filename in os.listdir("./cogs"):
+            if not filename.endswith(".py"):
+                continue
+            if filename.startswith("_"):
+                continue
+            file = filename[:-3]
+            if file == "dev" and not is_dev:
+                continue
+            await self.load_extension(f"cogs.{file}")
 
-        await bot.load_extension(f"cogs.{file}")
+        # sync application commands
+        if "waguri_prod" in os.environ:
+            await self.tree.sync()
 
-    # sync application commands
-    if "waguri_prod" in os.environ:
-        await bot.tree.sync()
+    async def close(self) -> None:
+        await super().close()
+        await self.http_client.close()
 
-
-@bot.event
-async def on_ready():
-    print(f"Logged in as {bot.user}")
-
-
-load_dotenv()
-# bot.run will raise KeyError if env variable is missing
-bot.run(os.environ["DISCORD_TOKEN"])
+    async def on_ready(self):
+        print(f"Logged in as {self.user}")
