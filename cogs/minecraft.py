@@ -30,6 +30,7 @@ class Minecraft(commands.Cog):
 
             players_online, players_max = status.players.online, status.players.max
             ping = round(status.latency, 2)
+            name = status.motd.to_plain().strip()
             player_list = ""
 
             try:
@@ -39,7 +40,7 @@ class Minecraft(commands.Cog):
             except Exception:
                 player_list = "Couldn't retrieve player list."
 
-            embed = discord.Embed(title=address, color=0x5B8731)
+            embed = discord.Embed(title=name, color=0x5B8731)
             embed.add_field(name="Ping", value=f"{ping}ms")
             embed.add_field(name="Online", value=f"{players_online}/{players_max}")
 
@@ -62,6 +63,7 @@ class Minecraft(commands.Cog):
         except Exception as e:
             await interaction.followup.send(f"Error: {e}")
 
+    # consider aiodns
     async def get_ip_address(self, address: str):
         loop = asyncio.get_event_loop()
         resolved_ip = ""
