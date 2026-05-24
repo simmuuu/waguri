@@ -1,17 +1,91 @@
 import asyncio
 import base64
 import io
+import math
 import socket
+from dataclasses import dataclass, field
+from enum import Enum, auto
 
 import discord
 from discord import app_commands
-from discord.ext import commands
+from discord.ext import commands, tasks
 from mcstatus import JavaServer
+from mcstatus.responses.java import JavaStatusResponse
+
+STATUS_TIMEOUT = 5.0
+QUERY_TIMEOUT = 4.0
+MAX_BACKOFF_INTERVAL = 300  # 5 mins
+
+
+class ServerState(Enum):
+    UNKNOWN = auto()
+    ONLINE = auto()
+    DEGRADED = auto()
+    OFFLINE = auto()
+
+
+class LatencyTier(Enum):
+    GOOD = (0, 300, "🟢 Good", 0x57F287)
+    MILD = (300, 500, "🟡 Mild lag", 0xFEE75C)
+    SEVERE = (500, 750, "🟠 Severe lag", 0xE67E22)
+    UNPLAYABLE = (750, float("inf"), "🔴 Unplayable", 0xED4245)
+
+    def __init__(self, low: float, high: float, label: str, color: int):
+        self.low = low
+        self.high = high
+        self.label = label
+        self.color = color
+
+    @classmethod
+    def classify(cls, ms: float) -> "LatencyTier":
+        return next(t for t in reversed(cls) if ms > t.low)
+
+    def format(self, ms: float) -> str:
+        return f"{self.label} ({ms:.0f}ms)"
+
+
+@dataclass
+class MonitoredServer:
+    guild_id: int
+    channel_id: int
+    address: str
+    port: int = 25565
+    query_port: int = 25565
+    interval: int = 60
+
+    state: ServerState = field(default=ServerState.UNKNOWN, init=False)
+    players_online: set[str] = field(default_factory=set, init=False)
+    _latency_tier: LatencyTier = field(default=LatencyTier.GOOD, init=False)
+    _status_fails: int = field(default=0, init=False)
+    _query_fails: int = field(default=0, init=False)
+    _last_poll: float = field(default=0.0, init=False)
+    _polling: bool = field(default=False, init=False)
+
+    STATUS_FAIL_THRESHOLD: int = 2
+    QUERY_FAIL_THRESHOLD: int = 3
+
+    @property
+    def effective_interval(self) -> float:
+        if self._status_fails <= self.STATUS_FAIL_THRESHOLD:
+            return float(self.interval)
+        steps = self._status_fails - self.STATUS_FAIL_THRESHOLD
+        return min(self.interval * math.pow(2, steps), MAX_BACKOFF_INTERVAL)
 
 
 class Minecraft(commands.Cog):
     def __init__(self, bot: commands.Bot):
         self.bot = bot
+        self._monitors: dict[int, MonitoredServer] = {}
+
+    async def cog_load(self) -> None:
+        self._poll_loop.start()
+
+    async def cog_unload(self) -> None:
+        self._poll_loop.cancel()
+
+    # ---------------------------------------------
+    # Commands
+    # ---------------------------------------------
 
     minecraft = app_commands.Group(name="minecraft", description="Minecraft Commands")
 
@@ -26,49 +100,288 @@ class Minecraft(commands.Cog):
     ):
         await interaction.response.defer()
         try:
-            ip_addr = await self._get_ip_address(address)
-            server = JavaServer(host=ip_addr, port=port, query_port=query_port)
+            _, status, players, query_ok = await self._fetch_server_data(
+                address, port, query_port
+            )
+        except TimeoutError:
+            await interaction.followup.send(
+                embed=discord.Embed(
+                    description=f"Server did not respond within {STATUS_TIMEOUT:.0f}s.",
+                    color=0xED4245,
+                )
+            )
+            return
+        except socket.gaierror:
+            await interaction.followup.send(
+                embed=discord.Embed(
+                    description="Could not resolve server address.",
+                    color=0xED4245,
+                )
+            )
+            return
+        except Exception as e:
+            await interaction.followup.send(
+                embed=discord.Embed(description=f"Error: {e}", color=0xED4245)
+            )
+            return
+
+        embed, file = self._build_status_embed(status, players, query_ok)
+        if file:
+            await interaction.followup.send(embed=embed, file=file)
+        else:
+            await interaction.followup.send(embed=embed)
+
+    @minecraft.command(
+        name="monitor",
+        description="Start monitoring a server and posting alerts to this channel",
+    )
+    @app_commands.describe(
+        address="Server address",
+        port="Default: 25565",
+        query_port="Default: 25565",
+        interval="Poll interval in seconds (min 30, max 300, default 60)",
+    )
+    @app_commands.guild_only()
+    @app_commands.checks.has_permissions(manage_guild=True)
+    async def monitor(
+        self,
+        interaction: discord.Interaction,
+        address: str,
+        port: int = 25565,
+        query_port: int = 25565,
+        interval: app_commands.Range[int, 30, 300] = 60,
+    ):
+        if interaction.guild_id is None or interaction.channel_id is None:
+            await interaction.response.send_message(
+                "This command must be used in a server.", ephemeral=True
+            )
+            return
+
+        ms = MonitoredServer(
+            guild_id=interaction.guild_id,
+            channel_id=interaction.channel_id,
+            address=address,
+            port=port,
+            query_port=query_port,
+            interval=interval,
+        )
+        self._monitors[interaction.guild_id] = ms
+        await interaction.response.send_message(
+            f"Now monitoring **{address}** - alerts in this channel (polling every {interval}s).",
+            ephemeral=True,
+        )
+
+    @minecraft.command(
+        name="unmonitor",
+        description="Stop monitoring the server",
+    )
+    @app_commands.guild_only()
+    @app_commands.checks.has_permissions(manage_guild=True)
+    async def unmonitor(self, interaction: discord.Interaction):
+        if interaction.guild_id is None:
+            await interaction.response.send_message(
+                "This command must be used in a server.", ephemeral=True
+            )
+            return
+
+        ms = self._monitors.pop(interaction.guild_id, None)
+        msg = (
+            f"Monitoring stopped. ({ms.address})"
+            if ms
+            else "No server is being monitored here."
+        )
+        await interaction.response.send_message(msg, ephemeral=True)
+
+    # ---------------------------------------------
+    # Poll Loop Stuff
+    # ---------------------------------------------
+    @tasks.loop(seconds=10)
+    async def _poll_loop(self):
+        now = asyncio.get_running_loop().time()
+        for ms in list(self._monitors.values()):
+            if ms._polling:
+                continue
+            if now - ms._last_poll < ms.effective_interval:
+                continue
+            ms._last_poll = now
+            ms._polling = True
+            asyncio.create_task(self._poll_server(ms))
+
+    @_poll_loop.before_loop
+    async def _before_poll(self):
+        await self.bot.wait_until_ready()
+
+    async def _poll_server(self, ms: MonitoredServer) -> None:
+        try:
+            await self._do_poll(ms)
+        finally:
+            ms._polling = False
+
+    async def _do_poll(self, ms: MonitoredServer) -> None:
+        channel = self.bot.get_channel(ms.channel_id)
+        if channel is None:
+            return
+
+        if not isinstance(channel, discord.abc.Messageable):
+            return
+
+        try:
+            _, status, current_players, query_ok = await self._fetch_server_data(
+                ms.address, ms.port, ms.query_port
+            )
+            ms._status_fails = 0
+        except Exception:
+            # transition to offline
+            ms._status_fails += 1
+            if ms._status_fails > ms.STATUS_FAIL_THRESHOLD:
+                await self._transition(ms, ServerState.OFFLINE, channel, status=None)
+            return
+
+        if not query_ok:
+            ms._query_fails += 1
+        else:
+            ms._query_fails = 0
+
+        curr_state = (
+            ServerState.DEGRADED
+            if ms._query_fails >= ms.QUERY_FAIL_THRESHOLD
+            else ServerState.ONLINE
+        )
+        # transition to degraded/online based upon query fails
+        await self._transition(ms, curr_state, channel, status=status)
+        await self._check_latency(ms, status.latency, channel)
+
+        if query_ok and ms.state == ServerState.ONLINE:
+            joined = current_players - ms.players_online
+            left = ms.players_online - current_players
+
+            if joined:
+                names = ", ".join(f"**{p}**" for p in sorted(joined))
+                await channel.send(f"🟢 {names} joined **{ms.address}**")
+            if left:
+                names = ", ".join(f"**{p}**" for p in sorted(left))
+                await channel.send(f"🔴 {names} left **{ms.address}**")
+            ms.players_online = current_players
+
+    # ---------------------------------------------
+    # State Handlers
+    # ---------------------------------------------
+
+    async def _transition(
+        self,
+        ms: MonitoredServer,
+        new_state: ServerState,
+        channel: discord.abc.Messageable,
+        *,
+        status: JavaStatusResponse | None,
+    ):
+        """
+        State Transition function which also sends a discord embed.
+        """
+        if new_state == ms.state:
+            return
+        old_state = ms.state
+        ms.state = new_state
+        addr = ms.address
+
+        if new_state == ServerState.ONLINE:
+            color, title = 0x57F287, "Server online"
+            desc = f"**{addr}** is back online."
+            if status:
+                desc += (
+                    f"\nPlayers: {status.players.online}/{status.players.max}"
+                    f"\nPing: {round(status.latency, 2)}ms"
+                )
+        elif new_state == ServerState.DEGRADED:
+            color, title = 0xFEE75C, "Query Port Not Responding"
+            desc = (
+                f"**{addr}** is reachable but query is not responding.\n"
+                "Player list tracking paused."
+            )
+        elif new_state == ServerState.OFFLINE:
+            color, title = 0xED4245, "Server offline"
+            desc = (
+                f"**{addr}** is not responding.\n"
+                f"Next check in {ms.effective_interval:.0f}s."
+            )
+        else:
+            color, title = 0x99AAB5, "Status unknown"
+            desc = f"**{addr}** status is unknown."
+        embed = discord.Embed(title=title, description=desc, color=color)
+        embed.set_footer(text=f"{old_state.name.lower()} → {new_state.name.lower()}")
+        await channel.send(embed=embed)
+
+    async def _check_latency(
+        self, ms: MonitoredServer, latency: float, channel: discord.abc.Messageable
+    ):
+        tier = LatencyTier.classify(latency)
+        if tier == ms._latency_tier:
+            return
+        ms._latency_tier = tier
+        await channel.send(
+            embed=discord.Embed(
+                description=f"**{tier.format(latency)}** - {ms.address}",
+                color=tier.color,
+            )
+        )
+
+    # ---------------------------------------------
+    # Helpers
+    # ---------------------------------------------
+
+    async def _fetch_server_data(
+        self, address: str, port: int, query_port: int
+    ) -> tuple[JavaServer, JavaStatusResponse, set, bool]:
+        async with asyncio.timeout(STATUS_TIMEOUT):
+            ip = await self._get_ip_address(address)
+            server = JavaServer(host=ip, port=port, query_port=query_port)
             status = await server.async_status()
 
-            players_online, players_max = status.players.online, status.players.max
-            ping = round(status.latency, 2)
-            name = status.motd.to_plain().strip()
-            player_list = ""
-
-            try:
+        try:
+            async with asyncio.timeout(QUERY_TIMEOUT):
                 query = await server.async_query()
-                if query.players.list:
-                    player_list = "\n".join(query.players.list)
-            except Exception:
-                player_list = "Couldn't retrieve player list."
+                players = set(query.players.list or [])
+                query_ok = True
+        except Exception:
+            players = set()
+            query_ok = False
 
-            embed = discord.Embed(title=name, color=0x5B8731)
-            embed.add_field(name="Ping", value=f"{ping}ms")
-            embed.add_field(name="Online", value=f"{players_online}/{players_max}")
+        return server, status, players, query_ok
 
-            if player_list:
-                embed.add_field(
-                    name="Players", value=f"```\n{player_list}\n```", inline=False
-                )
+    def _build_status_embed(
+        self, status: JavaStatusResponse, players: set, query_ok: bool
+    ) -> tuple[discord.Embed, discord.File | None]:
+        name = status.motd.to_plain().strip()
+        embed = discord.Embed(title=name, color=0x5B8731)
+        embed.add_field(name="Ping", value=f"{round(status.latency, 2)}ms")
+        embed.add_field(
+            name="Online", value=f"{status.players.online}/{status.players.max}"
+        )
 
-            if status.icon:
-                _, base64_data = status.icon.split(",")
-                image_bytes = base64.b64decode(base64_data)
-                buffer = io.BytesIO(image_bytes)
-                file = discord.File(buffer, filename="server_icon.png")
-                embed.set_thumbnail(url="attachment://server_icon.png")
-                await interaction.followup.send(embed=embed, file=file)
-            else:
-                await interaction.followup.send(embed=embed)
-        except socket.gaierror:
-            await interaction.followup.send("Could not resolve server address.")
-        except Exception as e:
-            await interaction.followup.send(f"Error: {e}")
+        if query_ok and players:
+            embed.add_field(
+                name="Players",
+                value=f"```\n{'\n'.join(sorted(players))}\n```",
+                inline=False,
+            )
+        elif not query_ok:
+            embed.add_field(
+                name="Players", value="*Query port unavailable*", inline=False
+            )
 
-    # consider aiodns
-    async def _get_ip_address(self, address: str):
-        loop = asyncio.get_event_loop()
-        resolved_ip = ""
+        embed.set_footer(text=f"Version: {status.version.name}")
+
+        if status.icon:
+            _, b64 = status.icon.split(",")
+            buf = io.BytesIO(base64.b64decode(b64))
+            file = discord.File(buf, filename="server_icon.png")
+            embed.set_thumbnail(url="attachment://server_icon.png")
+            return embed, file
+
+        return embed, None
+
+    async def _get_ip_address(self, address: str) -> str:
+        loop = asyncio.get_running_loop()
 
         # Try IPv6 first
         try:
