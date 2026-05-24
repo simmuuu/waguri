@@ -28,7 +28,12 @@ class Dev(commands.Cog):
 
     async def _sync_cogs(self, ctx: commands.Context):
         loaded = set(self.bot.extensions.keys())
-        on_disk = {f"cogs.{f[:-3]}" for f in os.listdir("./cogs") if f.endswith(".py")}
+        on_disk = {
+            f"cogs.{f[:-3]}"
+            for f in os.listdir("./cogs")
+            if f.endswith(".py")
+            if not f.startswith("_")
+        }
 
         to_load = on_disk - loaded
         to_unload = loaded - on_disk
