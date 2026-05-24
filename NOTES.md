@@ -1,12 +1,13 @@
 ## Ideas
 
-- /about -> bot source code link and author (me ofc, hehehehe)
+- [x] /about -> bot source code link and author (me ofc, hehehehe)
 
 ### Minecraft
 
 - [x] minecraft server info and query
-- [ ] join, left, session time watcher
-- [ ] minecraft server uptime (should ensure my bot uptime)
+- [x] join, left, session time watcher
+- [ ] minecraft server uptime (prolly use a third party service, and ping it to get uptime)
+- [ ] add persistent datastorage
 
 ### Valorant
 
@@ -21,10 +22,10 @@
 ### Utils
 
 - [x] randomisers (dice roll and coin flip)
-- [ ] urlshortener (via 3rd party service ofc)
+- [x] urlshortener (via 3rd party service ofc)
 - [ ] ip address details, nmap?
 - [ ] urban dictionary
-- [ ] avatar
+- [x] avatar
 - [ ] provide rich embed links (instagram.com -> kkinstagram.com, x.com -> fxtwitter.com) (regex)
 - [x] bot ping
-- [ ] bot memory and cpu usage
+- [ ] bot memory and cpu usage (requires psutil)
