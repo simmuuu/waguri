@@ -23,9 +23,11 @@
 
 - [x] randomisers (dice roll and coin flip)
 - [x] urlshortener (via 3rd party service ofc)
+- [x] avatar
+- [x] bot ping
+- [ ] translation context menu on messages
+- [ ] music with lavalink
 - [ ] ip address details, nmap?
 - [ ] urban dictionary
-- [x] avatar
 - [ ] provide rich embed links (instagram.com -> kkinstagram.com, x.com -> fxtwitter.com) (regex)
-- [x] bot ping
 - [ ] bot memory and cpu usage (requires psutil)
