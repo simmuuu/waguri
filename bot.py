@@ -46,4 +46,4 @@ class WaguriBot(commands.Bot):
         await self.http_client.close()
 
     async def on_ready(self):
-        print(f"Logged in as {self.user}")
+        print(f"Logged in as {self.user}", flush=True)
