@@ -1,0 +1,14 @@
+services:
+  waguri-bot:
+    build: .
+    restart: on-failure:3
+    volumes:
+      - ./data:/app/data
+    env_file:
+      - .env
+    networks:
+      - waguri_network
+
+networks:
+  waguri_network:
+    enable_ipv6: true
