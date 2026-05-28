@@ -1,83 +1,32 @@
 import asyncio
 import base64
 import io
-import math
 import socket
-from dataclasses import dataclass, field
-from enum import Enum, auto
 
+import aiosqlite
 import discord
 from discord import app_commands
 from discord.ext import commands, tasks
 from mcstatus import JavaServer
 from mcstatus.responses.java import JavaStatusResponse
 
+from bot import WaguriBot
+from db.minecraft import delete_monitor, init_db, load_monitors, save_monitor
+from models.minecraft import LatencyTier, MonitoredServer, ServerState
+
 STATUS_TIMEOUT = 5.0
 QUERY_TIMEOUT = 4.0
-MAX_BACKOFF_INTERVAL = 300  # 5 mins
-
-
-class ServerState(Enum):
-    UNKNOWN = auto()
-    ONLINE = auto()
-    DEGRADED = auto()
-    OFFLINE = auto()
-
-
-class LatencyTier(Enum):
-    GOOD = (0, 300, "🟢 Good", 0x57F287)
-    MILD = (300, 500, "🟡 Mild lag", 0xFEE75C)
-    SEVERE = (500, 750, "🟠 Severe lag", 0xE67E22)
-    UNPLAYABLE = (750, float("inf"), "🔴 Unplayable", 0xED4245)
-
-    def __init__(self, low: float, high: float, label: str, color: int):
-        self.low = low
-        self.high = high
-        self.label = label
-        self.color = color
-
-    @classmethod
-    def classify(cls, ms: float) -> "LatencyTier":
-        return next(t for t in reversed(cls) if ms > t.low)
-
-    def format(self, ms: float) -> str:
-        return f"{self.label} ({ms:.0f}ms)"
-
-
-@dataclass
-class MonitoredServer:
-    guild_id: int
-    channel_id: int
-    address: str
-    port: int = 25565
-    query_port: int = 25565
-    interval: int = 60
-
-    state: ServerState = field(default=ServerState.UNKNOWN, init=False)
-    players_online: set[str] = field(default_factory=set, init=False)
-    _latency_tier: LatencyTier = field(default=LatencyTier.GOOD, init=False)
-    _status_fails: int = field(default=0, init=False)
-    _query_fails: int = field(default=0, init=False)
-    _last_poll: float = field(default=0.0, init=False)
-    _polling: bool = field(default=False, init=False)
-
-    STATUS_FAIL_THRESHOLD: int = 2
-    QUERY_FAIL_THRESHOLD: int = 3
-
-    @property
-    def effective_interval(self) -> float:
-        if self._status_fails <= self.STATUS_FAIL_THRESHOLD:
-            return float(self.interval)
-        steps = self._status_fails - self.STATUS_FAIL_THRESHOLD
-        return min(self.interval * math.pow(2, steps), MAX_BACKOFF_INTERVAL)
 
 
 class Minecraft(commands.Cog):
-    def __init__(self, bot: commands.Bot):
+    def __init__(self, bot: WaguriBot):
         self.bot = bot
+        self.db: aiosqlite.Connection = self.bot.db.connection
         self._monitors: dict[int, MonitoredServer] = {}
 
     async def cog_load(self) -> None:
+        await init_db(self.db)
+        self._monitors = await load_monitors(self.db)
         self._poll_loop.start()
 
     async def cog_unload(self) -> None:
@@ -165,7 +114,10 @@ class Minecraft(commands.Cog):
             query_port=query_port,
             interval=interval,
         )
-        self._monitors[interaction.guild_id] = ms
+
+        self._monitors[interaction.channel_id] = ms
+        await save_monitor(self.db, ms)
+
         await interaction.response.send_message(
             f"Now monitoring **{address}** - alerts in this channel (polling every {interval}s).",
             ephemeral=True,
@@ -178,13 +130,15 @@ class Minecraft(commands.Cog):
     @app_commands.guild_only()
     @app_commands.checks.has_permissions(manage_guild=True)
     async def unmonitor(self, interaction: discord.Interaction):
-        if interaction.guild_id is None:
+        if interaction.guild_id is None or interaction.channel_id is None:
             await interaction.response.send_message(
                 "This command must be used in a server.", ephemeral=True
             )
             return
 
-        ms = self._monitors.pop(interaction.guild_id, None)
+        ms = self._monitors.pop(interaction.channel_id, None)
+        await delete_monitor(self.db, interaction.channel_id)
+
         msg = (
             f"Monitoring stopped. ({ms.address})"
             if ms
@@ -399,5 +353,5 @@ class Minecraft(commands.Cog):
         return resolved_ip
 
 
-async def setup(bot: commands.Bot):
+async def setup(bot: WaguriBot):
     await bot.add_cog(Minecraft(bot))

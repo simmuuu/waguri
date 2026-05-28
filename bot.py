@@ -3,6 +3,7 @@ import os
 import discord
 from discord.ext import commands
 
+from db.database import Database
 from utils.http import HttpClient
 
 intents = discord.Intents.default()
@@ -14,11 +15,15 @@ class WaguriBot(commands.Bot):
 
     def __init__(self):
         super().__init__(command_prefix="!", intents=intents)
+        self.db = Database()
+        self.http_client = HttpClient()
 
     async def setup_hook(self):
-        self.http_client = HttpClient()
+        await self.db.setup()
         self.http_client.start()
+        await self._load_cogs()
 
+    async def _load_cogs(self):
         is_dev = "waguri_dev" in os.environ
 
         for filename in os.listdir("./cogs"):
@@ -37,6 +42,7 @@ class WaguriBot(commands.Bot):
 
     async def close(self) -> None:
         await super().close()
+        await self.db.close()
         await self.http_client.close()
 
     async def on_ready(self):
