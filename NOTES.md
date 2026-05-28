@@ -1,3 +1,7 @@
+## Todo
+
+- [ ] Implement a proper logger
+
 ## Ideas
 
 - [x] /about -> bot source code link and author (me ofc, hehehehe)
