@@ -15,7 +15,7 @@ from db.minecraft import delete_monitor, init_db, load_monitors, save_monitor
 from models.minecraft import LatencyTier, MonitoredServer, ServerState
 
 STATUS_TIMEOUT = 5.0
-QUERY_TIMEOUT = 4.0
+QUERY_TIMEOUT = 8.0
 
 
 class Minecraft(commands.Cog):
@@ -91,7 +91,6 @@ class Minecraft(commands.Cog):
         interval="Poll interval in seconds (min 30, max 300, default 60)",
     )
     @app_commands.guild_only()
-    @app_commands.checks.has_permissions(manage_guild=True)
     async def monitor(
         self,
         interaction: discord.Interaction,
@@ -128,7 +127,6 @@ class Minecraft(commands.Cog):
         description="Stop monitoring the server",
     )
     @app_commands.guild_only()
-    @app_commands.checks.has_permissions(manage_guild=True)
     async def unmonitor(self, interaction: discord.Interaction):
         if interaction.guild_id is None or interaction.channel_id is None:
             await interaction.response.send_message(
