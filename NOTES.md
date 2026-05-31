@@ -11,7 +11,8 @@
 - [x] minecraft server info and query
 - [x] join, left, session time watcher
 - [ ] minecraft server uptime (prolly use a third party service, and ping it to get uptime)
-- [ ] add persistent datastorage
+- [x] add persistent datastorage
+- [ ] !! minecraft cog file getting bigger, time for a refactor soon probably
 
 ### Valorant
 
