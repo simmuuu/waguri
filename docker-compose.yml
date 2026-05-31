@@ -1,6 +1,6 @@
 services:
   waguri-discord-bot:
-    build: ghcr.io/simmuuu/waguri-discord-bot
+    image: ghcr.io/simmuuu/waguri-discord-bot
     restart: on-failure:3
     volumes:
       - ./data:/app/data
