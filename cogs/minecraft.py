@@ -11,7 +11,12 @@ from mcstatus import JavaServer
 from mcstatus.responses.java import JavaStatusResponse
 
 from bot import WaguriBot
-from db.minecraft import delete_monitor, init_db, load_monitors, save_monitor
+from db.minecraft import (
+    delete_monitor,
+    init_db,
+    load_monitors,
+    save_monitor,
+)
 from models.minecraft import LatencyTier, MonitoredServer, ServerState
 
 STATUS_TIMEOUT = 5.0
@@ -43,10 +48,27 @@ class Minecraft(commands.Cog):
     async def info(
         self,
         interaction: discord.Interaction,
-        address: str,
+        address: str | None = None,
         port: int = 25565,
         query_port: int = 25565,
     ):
+        if interaction.guild_id is None or interaction.channel_id is None:
+            await interaction.response.send_message(
+                "This command must be used in a server.", ephemeral=True
+            )
+            return
+
+        if not address and interaction.channel_id in self._monitors:
+            ms = self._monitors[interaction.channel_id]
+            address, port, query_port = ms.address, ms.port, ms.query_port
+
+        if not address:
+            await interaction.response.send_message(
+                "This channel is not being monitored. Please either add monitoring or provide an address.",
+                ephemeral=True,
+            )
+            return
+
         await interaction.response.defer()
         try:
             _, status, players, query_ok = await self._fetch_server_data(
