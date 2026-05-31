@@ -10,8 +10,9 @@
 
 - [x] minecraft server info and query
 - [x] join, left, session time watcher
-- [ ] minecraft server uptime (prolly use a third party service, and ping it to get uptime)
 - [x] add persistent datastorage
+- [ ] minecraft server uptime (prolly use a third party service, and ping it to get uptime)
+- [ ] ignore accepts any string, try to save playernames in the db first and then provide options
 - [ ] !! minecraft cog file getting bigger, time for a refactor soon probably
 
 ### Valorant

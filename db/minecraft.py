@@ -1,3 +1,5 @@
+from collections import defaultdict
+
 import aiosqlite
 
 from models.minecraft import MonitoredServer
@@ -14,7 +16,19 @@ async def init_db(db: aiosqlite.Connection):
             interval   INTEGER NOT NULL DEFAULT 60
         )
     """)
+    await db.execute("""
+        CREATE TABLE IF NOT EXISTS mc_ignore_players (
+            channel_id INTEGER NOT NULL,
+            username   TEXT NOT NULL,
+            PRIMARY KEY (channel_id, username)
+        )
+    """)
     await db.commit()
+
+
+# ---------------------------------------------
+# Minecraft Monitors
+# ---------------------------------------------
 
 
 async def load_monitors(db: aiosqlite.Connection) -> dict[int, MonitoredServer]:
@@ -34,7 +48,6 @@ async def save_monitor(db: aiosqlite.Connection, ms: MonitoredServer):
         INSERT INTO mc_monitors
         VALUES (:channel_id, :guild_id, :address, :port, :query_port, :interval)
         ON CONFLICT(channel_id) DO UPDATE SET
-                    channel_id = excluded.channel_id,
                     address    = excluded.address,
                     port       = excluded.port,
                     query_port = excluded.query_port,
@@ -56,5 +69,38 @@ async def delete_monitor(db: aiosqlite.Connection, channel_id: int):
     await db.execute(
         "DELETE FROM mc_monitors WHERE channel_id = ?",
         (channel_id,),
+    )
+    await db.commit()
+
+
+# ---------------------------------------------
+# Ignore Player Events
+# ---------------------------------------------
+
+
+async def load_ignore_players(db: aiosqlite.Connection) -> dict[int, set[str]]:
+    async with db.execute("SELECT channel_id, username FROM mc_ignore_players") as cur:
+        result: dict[int, set[str]] = defaultdict(set)
+        for row in await cur.fetchall():
+            channel_id, username = row["channel_id"], row["username"]
+            result[channel_id].add(username)
+        return result
+
+
+async def insert_ignore_player(
+    db: aiosqlite.Connection, channel_id: int, username: str
+):
+    await db.execute(
+        "INSERT INTO mc_ignore_players VALUES (?, ?)", (channel_id, username)
+    )
+    await db.commit()
+
+
+async def remove_ignore_player(
+    db: aiosqlite.Connection, channel_id: int, username: str
+):
+    await db.execute(
+        "DELETE FROM mc_ignore_players WHERE channel_id = ? AND username = ?",
+        (channel_id, username),
     )
     await db.commit()

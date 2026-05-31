@@ -2,6 +2,7 @@ import asyncio
 import base64
 import io
 import socket
+from collections import defaultdict
 
 import aiosqlite
 import discord
@@ -14,7 +15,10 @@ from bot import WaguriBot
 from db.minecraft import (
     delete_monitor,
     init_db,
+    insert_ignore_player,
+    load_ignore_players,
     load_monitors,
+    remove_ignore_player,
     save_monitor,
 )
 from models.minecraft import LatencyTier, MonitoredServer, ServerState
@@ -28,10 +32,12 @@ class Minecraft(commands.Cog):
         self.bot = bot
         self.db: aiosqlite.Connection = self.bot.db.connection
         self._monitors: dict[int, MonitoredServer] = {}
+        self._ignore_players: dict[int, set[str]] = defaultdict(set)
 
     async def cog_load(self) -> None:
         await init_db(self.db)
         self._monitors = await load_monitors(self.db)
+        self._ignore_players = await load_ignore_players(self.db)
         self._poll_loop.start()
 
     async def cog_unload(self) -> None:
@@ -166,6 +172,31 @@ class Minecraft(commands.Cog):
         )
         await interaction.response.send_message(msg, ephemeral=True)
 
+    @minecraft.command(name="ignore", description="Toggle player ignore event")
+    async def ignore(self, interaction: discord.Interaction, username: str):
+        if interaction.guild_id is None or interaction.channel_id is None:
+            await interaction.response.send_message(
+                "This command must be used in a server.", ephemeral=True
+            )
+            return
+
+        channel_id = interaction.channel_id
+        ignored = self._ignore_players[channel_id]
+
+        if username in ignored:
+            await remove_ignore_player(self.db, channel_id, username)
+            ignored.discard(username)
+            await interaction.response.send_message(
+                f"**{username}** will no longer be ignored (by {interaction.user.mention}).\nRun the command again to ignore player events."
+            )
+        else:
+            await insert_ignore_player(self.db, channel_id, username)
+            ignored.add(username)
+            await interaction.response.send_message(
+                f"**{username}** has been ignored.\nRun the command again to stop ignoring player events.",
+                ephemeral=True,
+            )
+
     # ---------------------------------------------
     # Poll Loop Stuff
     # ---------------------------------------------
@@ -204,6 +235,7 @@ class Minecraft(commands.Cog):
                 ms.address, ms.port, ms.query_port
             )
             ms._status_fails = 0
+            current_players -= self._ignore_players.get(ms.channel_id, set())
         except Exception:
             # transition to offline
             ms._status_fails += 1
