@@ -1,14 +1,11 @@
 services:
-  waguri-bot:
-    build: .
+  waguri-discord-bot:
+    build: ghcr.io/simmuuu/waguri-discord-bot
     restart: on-failure:3
     volumes:
       - ./data:/app/data
     env_file:
       - .env
-    networks:
-      - waguri_network
-
-networks:
-  waguri_network:
-    enable_ipv6: true
+    network_mode: host
+    labels:
+      - "io.containers.autoupdate=registry"
