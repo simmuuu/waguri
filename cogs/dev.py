@@ -1,9 +1,12 @@
 import os
+import pathlib
 from typing import Literal
 
 import discord
 from discord import app_commands
 from discord.ext import commands
+
+COGS_DIR = pathlib.Path(__file__).resolve().parent
 
 
 class Dev(commands.Cog):
@@ -37,10 +40,9 @@ class Dev(commands.Cog):
     async def _sync_cogs(self, interaction: discord.Interaction):
         loaded = set(self.bot.extensions.keys())
         on_disk = {
-            f"cogs.{f[:-3]}"
-            for f in os.listdir("./cogs")
-            if f.endswith(".py")
-            if not f.startswith("_")
+            f"cogs.{p.stem}"
+            for p in COGS_DIR.iterdir()
+            if p.suffix == ".py" and not p.stem.startswith("_")
         }
 
         to_load = on_disk - loaded
