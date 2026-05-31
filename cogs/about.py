@@ -1,3 +1,5 @@
+import os
+
 import discord
 from discord import app_commands
 from discord.ext import commands
@@ -22,6 +24,11 @@ class About(commands.Cog):
             ),
         )
         embed.set_thumbnail(url=AVATAR_URL)
+
+        commit_hash = os.getenv("COMMIT_SHA")
+        short = commit_hash[:7] if commit_hash is not None else "unknown"
+
+        embed.set_footer(text=f"Commit SHA: {short}")
         await interaction.response.send_message(embed=embed)
 
 
